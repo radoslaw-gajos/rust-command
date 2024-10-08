@@ -27,21 +27,23 @@ impl Clone for Box<dyn Command> {
 #[derive(Clone)]
 struct Add {
     augent: Rc<RefCell<i32>>, 
-    addend: i32,
+    addend: Rc<RefCell<i32>>,
+    addend_copy: Option<i32>,
 }
 
 impl Command for Add {
     fn execute(&mut self) {
         let augent = *self.augent.borrow();
-        let addend = self.addend;
+        let addend = *self.addend.borrow();
         let sum = augent + addend;
         println!("executing addition: {} + {} = {}", augent, addend, sum);
         *self.augent.borrow_mut() = sum;
+        self.addend_copy = Some(addend);
     }
 
     fn undo(&mut self) {
         let subtrahend = *self.augent.borrow();
-        let minuend = self.addend;
+        let minuend = self.addend_copy.expect("Undo should not be called before execute");
         let difference = subtrahend - minuend;
         println!("Undoing addition: {} - {} = {}", subtrahend, minuend, difference);
         *self.augent.borrow_mut() = difference;
@@ -49,7 +51,7 @@ impl Command for Add {
 
     fn redo(&mut self) {
         let augent = *self.augent.borrow();
-        let addend = self.addend;
+        let addend = self.addend_copy.expect("Redo should not be called before execute");
         let sum = augent + addend;
         println!("redoing addition: {} + {} = {}", augent, addend, sum);
         *self.augent.borrow_mut() = sum;
@@ -73,24 +75,46 @@ impl Command for DollarGiver {
 
 trait Button {
     fn click(&mut self);
+    fn unclick(&mut self);
+    fn reclick(&mut self);
 }
 
 struct SimpleButton {
     command: Box<dyn Command>,
+    prev: Vec<Box<dyn Command>>,
+    next: Vec<Box<dyn Command>>,
 }
 
 impl Button for SimpleButton {
     fn click(&mut self) {
         println!("*click*");
-        self.command.execute();
+        let mut command = self.command.clone();
+        command.execute();
+        self.prev.push(command);
+    }
+
+    fn unclick(&mut self) {
+        println!("*kcilc*");
+        let mut command = self.prev.pop().expect("You shouldn't unclick before clicking!");
+        command.undo();
+        self.next.push(command);
+    }
+
+    fn reclick(&mut self) {
+        println!("*click?*");
+        let mut command = self.next.pop().expect("You shouldn't reclick before unclicking!");
+        command.redo();
+        self.prev.push(command);
     }
 }
 
 fn main() {
     let x = Rc::new(RefCell::new(2));
+    let y = Rc::new(RefCell::new(3));
     let mut addition = Add {
-        augent: x,
-        addend: 3,
+        augent: Rc::clone(&x),
+        addend: Rc::clone(&y),
+        addend_copy: None,
     };
     addition.execute();
     addition.undo();
@@ -103,9 +127,16 @@ fn main() {
 
     let mut button = SimpleButton {
         command: Box::new(addition),
+        prev: Vec::new(),
+        next: Vec::new(),
     };
 
     button.click();
-
-    // Todo: history of commands + changeable addend
+    *y.borrow_mut() = 4;
+    button.click();
+    *y.borrow_mut() = 1;
+    button.click();
+    button.unclick();
+    button.unclick();
+    button.reclick();
 }
